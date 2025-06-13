@@ -1,5 +1,7 @@
 import logging
 import uuid
+import os   # <-- Yeh import add kiya hai
+
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 )
@@ -22,8 +24,8 @@ waiting_for_status = set()  # chat_id waiting for order ID after using /status
 # Replace with your actual admin chat ID
 ADMIN_CHAT_ID = 1069307863
 
-# Bot token
-BOT_TOKEN = "8080260301:AAHgH7ndKSKeTpAYY2BHcLQH8Dcdi4sFzjg"
+# Bot token (ab env variable se le rahe hain)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Plan selection keyboard
 def plan_keyboard():
