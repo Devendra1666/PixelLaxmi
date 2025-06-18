@@ -38,6 +38,14 @@ async def root():
 async def head_root():
     return
 
+@app.get("/ping")
+async def ping_get():
+    return {"ping": "pong"}
+
+@app.head("/ping")
+async def ping_head():
+    return
+
 def plan_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Basic ₹20", callback_data="plan_20")],
