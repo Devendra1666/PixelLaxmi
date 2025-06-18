@@ -30,6 +30,10 @@ RAZORPAY_LINKS = {
 app = FastAPI()
 telegram_app: Application = None
 
+@app.get("/")
+async def root():
+    return {"status": "PixelLaxmi Bot is running"}
+
 def plan_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Basic ₹20", callback_data="plan_20")],
