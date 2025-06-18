@@ -21,9 +21,9 @@ ADMIN_CHAT_ID = 1069307863
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = "https://YOUR_RENDER_URL_HERE/webhook"
 RAZORPAY_LINKS = {
-    20: "https://rzp.io/l/basic20",
-    30: "https://rzp.io/l/high30",
-    50: "https://rzp.io/l/ultra50"
+    20: "https://rzp.io/rzp/0YOfrpS",
+    30: "https://rzp.io/rzp/NTJ69QRD",
+    50: "https://rzp.io/rzp/rSAe7dZ"
 }
 
 app = FastAPI()
