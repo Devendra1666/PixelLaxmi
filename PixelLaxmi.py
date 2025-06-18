@@ -191,6 +191,7 @@ async def telegram_webhook(req: Request):
     return {"ok": True}
 
 async def main():
+    print(f"Loaded Token: {BOT_TOKEN}")
     global telegram_app
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
