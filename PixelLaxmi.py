@@ -34,6 +34,10 @@ telegram_app: Application = None
 async def root():
     return {"status": "PixelLaxmi Bot is running"}
 
+@app.head("/")
+async def head_root():
+    return
+
 def plan_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Basic ₹20", callback_data="plan_20")],
