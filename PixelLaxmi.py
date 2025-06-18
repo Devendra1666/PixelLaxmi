@@ -182,8 +182,12 @@ async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TY
 
 @app.post("/webhook")
 async def telegram_webhook(req: Request):
+    global telegram_app
+    if telegram_app is None:
+        return {"ok": False, "error": "Bot not initialized yet"}
     data = await req.json()
-    await telegram_app.update_queue.put(Update.de_json(data, telegram_app.bot))
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
     return {"ok": True}
 
 async def main():
