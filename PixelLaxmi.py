@@ -215,6 +215,10 @@ async def main():
     print("Bot started with webhook...")
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    async def run():
+        await main()
+        config = uvicorn.Config(app=app, host="0.0.0.0", port=8000, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    asyncio.run(run())
