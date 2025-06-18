@@ -203,9 +203,9 @@ async def main():
     telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
 
     await telegram_app.initialize()
+    await telegram_app.start()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     print("Webhook set: True")
-    await telegram_app.start()
     print("Bot started with webhook...")
 
 if __name__ == "__main__":
