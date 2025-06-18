@@ -205,7 +205,10 @@ async def main():
     await telegram_app.initialize()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     print("Webhook set: True")
+    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    print("Webhook set: True")
     await telegram_app.start()
+    print("Bot started with webhook...")
     print("Bot started with webhook...")
 
 if __name__ == "__main__":
