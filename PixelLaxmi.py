@@ -8,27 +8,34 @@ from fastapi import FastAPI, Request
 import uvicorn
 import asyncio
 
+# Logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# Globals
 orders = {}
 waiting_for_status = set()
-
 ADMIN_CHAT_ID = 1069307863
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = "https://YOUR_RENDER_URL_HERE/webhook"
+
+# ✅ Replace with your actual Render URL
+WEBHOOK_URL = "https://pixellaxmi.onrender.com/webhook"
+
+# ✅ Replace with your actual Razorpay links
 RAZORPAY_LINKS = {
     20: "https://rzp.io/rzp/0YOfrpS",
     30: "https://rzp.io/rzp/NTJ69QRD",
     50: "https://rzp.io/rzp/rSAe7dZ"
 }
 
+# FastAPI app
 app = FastAPI()
 telegram_app: Application = None
 
+# UI
 def plan_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Basic ₹20", callback_data="plan_20")],
@@ -46,6 +53,7 @@ def admin_keyboard(order_id):
         [InlineKeyboardButton("Send Upscaled Image 🚀", callback_data=f"send_upscaled|{order_id}")],
     ])
 
+# Bot Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✨ Welcome! Please upload your image to start your order. ✨")
 
@@ -65,7 +73,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    order_id = next((oid for oid, o in orders.items() if o['user_id'] == user_id and o['status'] in ['waiting_plan','waiting_payment']), None)
+    order_id = next((oid for oid, o in orders.items() if o['user_id'] == user_id and o['status'] in ['waiting_plan', 'waiting_payment']), None)
     if not order_id:
         await update.message.reply_text("No pending order found.")
     else:
@@ -179,12 +187,14 @@ async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(f"✅ Order {oid} has been marked as complete.")
             return
 
+# Webhook receiver
 @app.post("/webhook")
 async def telegram_webhook(req: Request):
     data = await req.json()
     await telegram_app.update_queue.put(Update.de_json(data, telegram_app.bot))
     return {"ok": True}
 
+# Main app
 async def main():
     global telegram_app
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -201,11 +211,13 @@ async def main():
     telegram_app.add_handler(CallbackQueryHandler(plan_choice, pattern=r"^plan_"))
     telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
 
-    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    success = await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    print("Webhook set:", success)
     await telegram_app.initialize()
     await telegram_app.start()
     print("Bot started with webhook...")
 
+# Run server
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.create_task(main())
