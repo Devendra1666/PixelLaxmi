@@ -1,14 +1,12 @@
 import logging
 import uuid
 import os
-
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-)
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, filters,
-    CallbackQueryHandler, ContextTypes
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext._application import Application
+from fastapi import FastAPI, Request
+import uvicorn
+import asyncio
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -21,12 +19,15 @@ waiting_for_status = set()
 
 ADMIN_CHAT_ID = 1069307863
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
+WEBHOOK_URL = "https://YOUR_RENDER_URL_HERE/webhook"
 RAZORPAY_LINKS = {
-    20: "https://rzp.io/rzp/0YOfrpS",
-    30: "https://rzp.io/rzp/NTJ69QRD",
-    50: "https://rzp.io/rzp/rSAe7dZ"
+    20: "https://rzp.io/l/basic20",
+    30: "https://rzp.io/l/high30",
+    50: "https://rzp.io/l/ultra50"
 }
+
+app = FastAPI()
+telegram_app: Application = None
 
 def plan_keyboard():
     return InlineKeyboardMarkup([
@@ -46,7 +47,7 @@ def admin_keyboard(order_id):
     ])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("\u2728 Welcome! Please upload your image to start your order. \u2728")
+    await update.message.reply_text("✨ Welcome! Please upload your image to start your order. ✨")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -127,7 +128,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if pending:
         await update.message.reply_text("⚠️ Please complete your pending order (choose plan / upload payment proof), or send /cancel to cancel the order.")
     else:
-        await update.message.reply_text("\u2728 Main Menu \u2728\n/start - Upload an image to place an order\n/status - Check your order status\n/contact - Contact admin for support\n/cancel - Cancel your current order")
+        await update.message.reply_text("✨ Main Menu ✨\n/start - Upload an image to place an order\n/status - Check your order status\n/contact - Contact admin for support\n/cancel - Cancel your current order")
 
 async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -178,30 +179,34 @@ async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(f"✅ Order {oid} has been marked as complete.")
             return
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+@app.post("/webhook")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    await telegram_app.update_queue.put(Update.de_json(data, telegram_app.bot))
+    return {"ok": True}
 
-    app.bot.set_my_commands([
-        BotCommand("start", "Upload an image to start your order"),
-        BotCommand("status", "Check the status of your order"),
-        BotCommand("contact", "Contact support"),
-        BotCommand("cancel", "Cancel your current order"),
-    ])
+async def main():
+    global telegram_app
+    telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("cancel", cancel_order))
-    app.add_handler(CommandHandler("contact", contact))
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("status", status))
+    telegram_app.add_handler(CommandHandler("cancel", cancel_order))
+    telegram_app.add_handler(CommandHandler("contact", contact))
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.User(ADMIN_CHAT_ID), text_handler))
-    app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
-    app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_CHAT_ID), handle_admin_upscaled))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.User(ADMIN_CHAT_ID), text_handler))
+    telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
+    telegram_app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_CHAT_ID), handle_admin_upscaled))
 
-    app.add_handler(CallbackQueryHandler(plan_choice, pattern=r"^plan_"))
-    app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
+    telegram_app.add_handler(CallbackQueryHandler(plan_choice, pattern=r"^plan_"))
+    telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
 
-    print("Bot started...")
-    app.run_polling()
+    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    await telegram_app.initialize()
+    await telegram_app.start()
+    print("Bot started with webhook...")
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    uvicorn.run(app, host="0.0.0.0", port=8000)
