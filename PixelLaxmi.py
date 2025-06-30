@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 orders = {}
 waiting_for_status = set()
 
-ADMIN_CHAT_ID = 1069307863
+ADMIN_CHAT_ID = 8178524981
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = "https://pixellaxmi.onrender.com/webhook"
 
