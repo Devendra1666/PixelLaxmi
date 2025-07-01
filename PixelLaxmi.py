@@ -3,7 +3,7 @@ import uuid
 import os
 import re
 import smtplib
-import requests
+from io import BytesIO
 from email.message import EmailMessage
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -61,19 +61,19 @@ def admin_keyboard(order_id):
 
 def send_email_with_image(to_email, file_id, order_id):
     try:
-        bot_token = BOT_TOKEN
-        file_info_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
-        file_info_response = requests.get(file_info_url).json()
-        file_path = file_info_response['result']['file_path']
-        file_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
-        file_data = requests.get(file_url).content
-
         msg = EmailMessage()
         msg['Subject'] = f"Your Upscaled Image - Order {order_id}"
         msg['From'] = EMAIL_USER
         msg['To'] = to_email
-        msg.set_content(f"Hi! Your upscaled image for Order {order_id} is attached. Thank you!")
-        msg.add_attachment(file_data, maintype='image', subtype='jpeg', filename=f'upscaled_{order_id}.jpg')
+        msg.set_content(f"Hi!\n\nYour upscaled image for Order {order_id} is attached.\n\nThank you!")
+
+        bot = telegram_app.bot
+        file = asyncio.run(bot.get_file(file_id))
+        file_bytes = BytesIO()
+        file.download(out=file_bytes)
+        file_bytes.seek(0)
+
+        msg.add_attachment(file_bytes.read(), maintype='image', subtype='jpeg', filename=f"upscaled_{order_id}.jpg")
 
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as smtp:
             smtp.starttls()
@@ -82,7 +82,7 @@ def send_email_with_image(to_email, file_id, order_id):
 
         return True
     except Exception as e:
-        logger.error(f"Failed to send email: {e}")
+        logger.error(f"❌ Failed to send email with image: {e}")
         return False
 
 @app.get("/")
@@ -177,7 +177,7 @@ async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         'status': 'waiting_plan'
     }
     await update.message.reply_text(
-        f"🄐 Your Order ID is: `{new_oid}`\nPlease select a plan:",
+        f"🆔 Your Order ID is: `{new_oid}`\nPlease select a plan:",
         parse_mode="Markdown",
         reply_markup=plan_keyboard()
     )
