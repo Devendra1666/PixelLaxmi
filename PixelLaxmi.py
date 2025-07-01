@@ -165,6 +165,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 order['email'] = text
                 order['status'] = 'waiting_admin'
                 await update.message.reply_text("✅ Email saved! Please wait while admin reviews your payment.")
+
+                # Notify admin after email is saved
+                await context.bot.send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
+                    reply_markup=admin_keyboard(oid)
+                )
             else:
                 await update.message.reply_text("❌ Invalid email. Please enter a valid email address (example@example.com)")
             return
