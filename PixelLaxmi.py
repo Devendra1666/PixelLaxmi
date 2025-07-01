@@ -121,11 +121,23 @@ async def telegram_webhook(req: Request):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✨ Welcome! Please upload your image to start your order. ✨")
 
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    found = False
+    for oid, order in list(orders.items()):
+        if order['user_id'] == user_id and order['status'] not in ['complete', 'rejected']:
+            del orders[oid]
+            found = True
+            await update.message.reply_text(f"❌ Your order {oid} has been cancelled.")
+            break
+    if not found:
+        await update.message.reply_text("❌ You have no active order to cancel.")
+
 async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     for oid, order in orders.items():
         if order['user_id'] == user.id and order['status'] in ['waiting_payment', 'approved', 'awaiting_upscaled']:
-            await update.message.reply_text("🚧 You have an ongoing order. Please complete it first or send /cancel to start new one.")
+            await update.message.reply_text("🚧 You have an ongoing order. Please complete it first or send /cancel to start a new one.")
             return
 
     file_id = update.message.photo[-1].file_id
@@ -158,6 +170,11 @@ async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.message.from_user.id
+
+    if text.lower() == "/cancel":
+        await cancel(update, context)
+        return
+
     for oid, order in orders.items():
         if order['user_id'] == user_id and order['status'] == 'approved':
             if is_valid_email(text) and not has_typo(text):
@@ -168,8 +185,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❗ Invalid email. Please retype it correctly.")
             return
         elif order['user_id'] == user_id and order['status'] in ['waiting_payment', 'awaiting_upscaled']:
-            await update.message.reply_text("🚧 You have an ongoing order. Please complete or cancel it.")
+            await update.message.reply_text("🚧 You have an ongoing order. Please complete or send /cancel to cancel it.")
             return
+
     await update.message.reply_text("Send /start to begin a new order or upload an image.")
 
 async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -232,6 +250,7 @@ async def main():
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("cancel", cancel))
     telegram_app.add_handler(CallbackQueryHandler(plan_choice, pattern=r"^plan_"))
     telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
     telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
