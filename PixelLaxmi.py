@@ -201,10 +201,14 @@ async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("📧 Please send your email address where we can send the image (optional).")
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
-                text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
+                text=f"💰 Payment Received for Order {oid}
+User: {order['user_name']} (ID: {order['user_id']})
+Plan: ₹{order['plan']}",
                 reply_markup=admin_keyboard(oid)
             )
             return
+    # Only reply "ongoing order" message if the image is not valid payment proof
+    await update.message.reply_text("No matching order found. If you have an ongoing order, please complete it or send /cancel to cancel.")
     await update.message.reply_text("No matching order found.")
 
 async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
