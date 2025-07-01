@@ -5,7 +5,7 @@ import re
 import smtplib
 from io import BytesIO
 from email.message import EmailMessage
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram.ext._application import Application
 from fastapi import FastAPI, Request
@@ -47,7 +47,7 @@ def is_valid_email(email):
     return re.match(r"[^@]+@[^@]+\.[^@]+", email)
 
 def has_typo(email):
-    domain = email.split("@")[-1]
+    domain = email.split("@")[−1]
     return any(m in domain for m in COMMON_MISTAKES)
 
 def plan_keyboard():
