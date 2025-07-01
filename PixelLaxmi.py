@@ -3,6 +3,7 @@ import uuid
 import os
 import re
 import smtplib
+import requests
 from email.message import EmailMessage
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -60,15 +61,25 @@ def admin_keyboard(order_id):
 
 def send_email_with_image(to_email, file_id, order_id):
     try:
+        bot_token = BOT_TOKEN
+        file_info_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
+        file_info_response = requests.get(file_info_url).json()
+        file_path = file_info_response['result']['file_path']
+        file_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+        file_data = requests.get(file_url).content
+
         msg = EmailMessage()
         msg['Subject'] = f"Your Upscaled Image - Order {order_id}"
         msg['From'] = EMAIL_USER
         msg['To'] = to_email
         msg.set_content(f"Hi! Your upscaled image for Order {order_id} is attached. Thank you!")
+        msg.add_attachment(file_data, maintype='image', subtype='jpeg', filename=f'upscaled_{order_id}.jpg')
+
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as smtp:
             smtp.starttls()
             smtp.login(EMAIL_USER, EMAIL_PASS)
             smtp.send_message(msg)
+
         return True
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
@@ -88,6 +99,8 @@ async def telegram_webhook(req: Request):
     await telegram_app.process_update(update)
     return {"ok": True}
 
+COMMON_MISTAKES = ["gamil.com", "gmial.com", "gnail.com", "yahho.com", "yhoo.com"]
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✨ Welcome! Please upload your image to start your order. ✨")
 
@@ -102,6 +115,44 @@ def find_pending_order(user_id):
         if order['user_id'] == user_id and order['status'] in ['waiting_plan', 'waiting_payment', 'waiting_email']:
             return oid
     return None
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.from_user.id
+    text = update.message.text.strip()
+
+    if chat_id in waiting_for_status and not text.startswith('/'):
+        waiting_for_status.remove(chat_id)
+        order = orders.get(text)
+        if order and order['user_id'] == chat_id:
+            await update.message.reply_text(f"📦 Order {text} status: {order['status']}")
+        else:
+            await update.message.reply_text("❌ Order not found or does not belong to you.")
+        return
+
+    for oid, order in orders.items():
+        if order['user_id'] == chat_id and order['status'] == 'waiting_email':
+            if any(domain in text.lower() for domain in COMMON_MISTAKES):
+                await update.message.reply_text("❌ It looks like your email domain might be mistyped. Did you mean @gmail.com?")
+                return
+            if is_valid_email(text):
+                order['email'] = text
+                order['status'] = 'waiting_admin'
+                await update.message.reply_text("✅ Email saved! Please wait while admin reviews your payment.")
+
+                await context.bot.send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
+                    reply_markup=admin_keyboard(oid)
+                )
+            else:
+                await update.message.reply_text("❌ Invalid email. Please enter a valid email address (example@example.com)")
+            return
+
+    pending = find_pending_order(chat_id)
+    if pending:
+        await update.message.reply_text("⚠️ Please complete your pending order or send /cancel to cancel it.")
+    else:
+        await update.message.reply_text("✨ Main Menu ✨\n/start - Upload image\n/status - Check status\n/contact - Contact admin\n/cancel - Cancel order")
 
 async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
@@ -126,7 +177,7 @@ async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         'status': 'waiting_plan'
     }
     await update.message.reply_text(
-        f"🆔 Your Order ID is: `{new_oid}`\nPlease select a plan:",
+        f"🄐 Your Order ID is: `{new_oid}`\nPlease select a plan:",
         parse_mode="Markdown",
         reply_markup=plan_keyboard()
     )
@@ -145,42 +196,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         waiting_for_status.add(chat_id)
         await update.message.reply_text("🔐 Please send your Order ID to check the status. Example: `a1b2c3d4`", parse_mode="Markdown")
-
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.from_user.id
-    text = update.message.text.strip()
-
-    if chat_id in waiting_for_status and not text.startswith('/'):
-        waiting_for_status.remove(chat_id)
-        order = orders.get(text)
-        if order and order['user_id'] == chat_id:
-            await update.message.reply_text(f"📦 Order {text} status: {order['status']}")
-        else:
-            await update.message.reply_text("❌ Order not found or does not belong to you.")
-        return
-
-    for oid, order in orders.items():
-        if order['user_id'] == chat_id and order['status'] == 'waiting_email':
-            if is_valid_email(text):
-                order['email'] = text
-                order['status'] = 'waiting_admin'
-                await update.message.reply_text("✅ Email saved! Please wait while admin reviews your payment.")
-
-                # Notify admin after email is saved
-                await context.bot.send_message(
-                    chat_id=ADMIN_CHAT_ID,
-                    text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
-                    reply_markup=admin_keyboard(oid)
-                )
-            else:
-                await update.message.reply_text("❌ Invalid email. Please enter a valid email address (example@example.com)")
-            return
-
-    pending = find_pending_order(chat_id)
-    if pending:
-        await update.message.reply_text("⚠️ Please complete your pending order or send /cancel to cancel it.")
-    else:
-        await update.message.reply_text("✨ Main Menu ✨\n/start - Upload image\n/status - Check status\n/contact - Contact admin\n/cancel - Cancel order")
 
 async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
