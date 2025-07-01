@@ -27,7 +27,7 @@ def admin_keyboard(order_id):
 
 def user_active_pending_order(user_id):
     for oid, o in orders.items():
-        # Only consider if not complete/cancelled/rejected/approved & not waiting email input
+        # Only if not complete/cancelled/rejected/approved & not waiting email input/admin action
         if o['user_id'] == user_id and o['status'] in ['waiting_image', 'waiting_plan', 'waiting_payment']:
             return oid
     return None
@@ -58,7 +58,10 @@ async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif order['status'] == 'waiting_payment':
         order['payment_proof'] = update.message.photo[-1].file_id
         order['status'] = 'waiting_email'
-        await context.bot.send_message(chat_id=user_id, text="📩 (Optional) Enter your email to receive the upscaled image (or type 'skip'):")
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="📩 (Optional) Enter your email address to receive the upscaled image (or type 'skip'):"
+        )
 
 async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -73,7 +76,10 @@ async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_plan = int(query.data.split('_')[1])
         order['plan'] = selected_plan
         order['status'] = 'waiting_payment'
-        await context.bot.send_message(chat_id=user_id, text=f"💡 You selected ₹{selected_plan} plan. Pay via this link: https://rzp.io/r/NTJ69QRD\n\nAfter payment, upload the payment screenshot here.")
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"💡 You selected ₹{selected_plan} plan. Pay via this link: https://rzp.io/r/NTJ69QRD\n\nAfter payment, upload the payment screenshot here."
+        )
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -91,15 +97,23 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if msg.lower() != "skip":
             order['email'] = msg
         order['status'] = 'waiting_admin_action'
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"🆕 New Order Received!\nOrder ID: {oid}", reply_markup=admin_keyboard(oid))
+        await context.bot.send_message(
+            chat_id=ADMIN_CHAT_ID,
+            text=f"🆕 New Order Received!\nOrder ID: {oid}",
+            reply_markup=admin_keyboard(oid)
+        )
         await context.bot.send_message(chat_id=user_id, text="🕐 Payment proof submitted. Waiting for admin approval.")
         return
 
     # ONGOING ORDER: ANY OTHER TEXT (not email stage, not payment proof, not commands)
     if user_active_pending_order(user_id):
         await context.bot.send_message(
-            chat_id=user_id, 
-            text="🚧 You have an ongoing order! Complete it, /cancel to abort, ya new image upload karo."
+            chat_id=user_id,
+            text=(
+                "🚧 You have an ongoing order!\n\n"
+                "👉 Order continue karne ke liye image upload karo ya payment proof bhejo.\n"
+                "❌ Order cancel karna hai toh /cancel type karo."
+            )
         )
         return
 
