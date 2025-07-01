@@ -44,7 +44,7 @@ def is_valid_email(email):
     return re.match(r"[^@]+@[^@]+\.[^@]+", email)
 
 def has_typo(email):
-    domain = email.split("@")[-1]
+    domain = email.split("@")[1]
     return any(m in domain for m in COMMON_MISTAKES)
 
 def plan_keyboard():
@@ -133,8 +133,9 @@ async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if order['user_id'] == user.id and order['status'] == 'waiting_payment':
             proof_id = update.message.photo[-1].file_id
             order['payment_proof'] = proof_id
-            order['status'] = 'waiting_admin'
-            await update.message.reply_text("✅ Payment proof received. Awaiting admin approval.")
+            order['status'] = 'approved'
+            await update.message.reply_text("✅ Payment proof received.")
+            await update.message.reply_text("📧 Please send your email address where we can deliver the upscaled image (optional). Or just wait and receive it here on Telegram.")
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
                 text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
