@@ -11,6 +11,7 @@ from telegram.ext._application import Application
 from fastapi import FastAPI, Request
 import uvicorn
 import asyncio
+from functools import partial
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -39,8 +40,14 @@ RAZORPAY_LINKS = {
 app = FastAPI()
 telegram_app: Application = None
 
+COMMON_MISTAKES = ["gamil.com", "gmial.com", "gnail.com", "yahho.com", "yhoo.com"]
+
 def is_valid_email(email):
     return re.match(r"[^@]+@[^@]+\.[^@]+", email)
+
+def has_typo(email):
+    domain = email.split("@")[-1]
+    return any(m in domain for m in COMMON_MISTAKES)
 
 def plan_keyboard():
     return InlineKeyboardMarkup([
@@ -59,26 +66,29 @@ def admin_keyboard(order_id):
         [InlineKeyboardButton("Send Upscaled Image 🚀", callback_data=f"send_upscaled|{order_id}")],
     ])
 
-def send_email_with_image(to_email, file_id, order_id):
+async def send_email_with_image(to_email, file_id, order_id):
     try:
+        bot = telegram_app.bot
+        tg_file = await bot.get_file(file_id)
+        file_bytes = BytesIO()
+        await tg_file.download_to_memory(out=file_bytes)
+        file_bytes.seek(0)
+
         msg = EmailMessage()
         msg['Subject'] = f"Your Upscaled Image - Order {order_id}"
         msg['From'] = EMAIL_USER
         msg['To'] = to_email
         msg.set_content(f"Hi!\n\nYour upscaled image for Order {order_id} is attached.\n\nThank you!")
-
-        bot = telegram_app.bot
-        file = asyncio.run(bot.get_file(file_id))
-        file_bytes = BytesIO()
-        file.download(out=file_bytes)
-        file_bytes.seek(0)
-
         msg.add_attachment(file_bytes.read(), maintype='image', subtype='jpeg', filename=f"upscaled_{order_id}.jpg")
 
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as smtp:
-            smtp.starttls()
-            smtp.login(EMAIL_USER, EMAIL_PASS)
-            smtp.send_message(msg)
+        def send():
+            with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as smtp:
+                smtp.starttls()
+                smtp.login(EMAIL_USER, EMAIL_PASS)
+                smtp.send_message(msg)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, send)
 
         return True
     except Exception as e:
@@ -99,8 +109,7 @@ async def telegram_webhook(req: Request):
     await telegram_app.process_update(update)
     return {"ok": True}
 
-COMMON_MISTAKES = ["gamil.com", "gmial.com", "gnail.com", "yahho.com", "yhoo.com"]
-
+# --- Start Bot Logic ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✨ Welcome! Please upload your image to start your order. ✨")
 
@@ -110,58 +119,19 @@ async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = f"📩 Contact Request:\nUser: {user.full_name} (ID: {user.id})\nUsername: @{user.username or 'N/A'}"
     await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
 
-def find_pending_order(user_id):
-    for oid, order in orders.items():
-        if order['user_id'] == user_id and order['status'] in ['waiting_plan', 'waiting_payment', 'waiting_email']:
-            return oid
-    return None
-
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.from_user.id
-    text = update.message.text.strip()
-
-    if chat_id in waiting_for_status and not text.startswith('/'):
-        waiting_for_status.remove(chat_id)
-        order = orders.get(text)
-        if order and order['user_id'] == chat_id:
-            await update.message.reply_text(f"📦 Order {text} status: {order['status']}")
-        else:
-            await update.message.reply_text("❌ Order not found or does not belong to you.")
-        return
-
-    for oid, order in orders.items():
-        if order['user_id'] == chat_id and order['status'] == 'waiting_email':
-            if any(domain in text.lower() for domain in COMMON_MISTAKES):
-                await update.message.reply_text("❌ It looks like your email domain might be mistyped. Did you mean @gmail.com?")
-                return
-            if is_valid_email(text):
-                order['email'] = text
-                order['status'] = 'waiting_admin'
-                await update.message.reply_text("✅ Email saved! Please wait while admin reviews your payment.")
-
-                await context.bot.send_message(
-                    chat_id=ADMIN_CHAT_ID,
-                    text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
-                    reply_markup=admin_keyboard(oid)
-                )
-            else:
-                await update.message.reply_text("❌ Invalid email. Please enter a valid email address (example@example.com)")
-            return
-
-    pending = find_pending_order(chat_id)
-    if pending:
-        await update.message.reply_text("⚠️ Please complete your pending order or send /cancel to cancel it.")
-    else:
-        await update.message.reply_text("✨ Main Menu ✨\n/start - Upload image\n/status - Check status\n/contact - Contact admin\n/cancel - Cancel order")
-
 async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     for oid, order in orders.items():
         if order['user_id'] == user.id and order['status'] == 'waiting_payment':
             proof_id = update.message.photo[-1].file_id
             order['payment_proof'] = proof_id
-            order['status'] = 'waiting_email'
-            await update.message.reply_text("✅ Payment proof received.\n📧 Please enter your email address so we can send the upscaled image there too.")
+            order['status'] = 'waiting_admin'
+            await update.message.reply_text("✅ Payment proof received. Awaiting admin approval.")
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
+                reply_markup=admin_keyboard(oid)
+            )
             return
 
     file_id = update.message.photo[-1].file_id
@@ -173,29 +143,10 @@ async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         'plan': None,
         'payment_proof': None,
         'upscaled_file_id': None,
-        'email': None,
-        'status': 'waiting_plan'
+        'status': 'waiting_plan',
+        'email': None
     }
-    await update.message.reply_text(
-        f"🆔 Your Order ID is: `{new_oid}`\nPlease select a plan:",
-        parse_mode="Markdown",
-        reply_markup=plan_keyboard()
-    )
-
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.from_user.id
-    args = context.args
-
-    if args:
-        order_id = args[0]
-        order = orders.get(order_id)
-        if order and order['user_id'] == chat_id:
-            await update.message.reply_text(f"📦 Order {order_id} status: {order['status']}")
-        else:
-            await update.message.reply_text("❌ Order not found or does not belong to you.")
-    else:
-        waiting_for_status.add(chat_id)
-        await update.message.reply_text("🔐 Please send your Order ID to check the status. Example: `a1b2c3d4`", parse_mode="Markdown")
+    await update.message.reply_text(f"🆔 Your Order ID is: {new_oid}\nPlease select a plan:", reply_markup=plan_keyboard())
 
 async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -206,9 +157,35 @@ async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             order['plan'] = int(price)
             order['status'] = 'waiting_payment'
             payment_link = RAZORPAY_LINKS.get(int(price), "")
-            await query.message.edit_text(f"💡 You selected the ₹{price} plan. Pay here: {payment_link}\nAfter payment, upload screenshot here.")
+            await query.message.edit_text(f"💡 You selected the ₹{price} plan. Please pay using this link: {payment_link}\n\nAfter payment, upload the payment screenshot here.")
             return
     await query.message.reply_text("No pending order found.")
+
+async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for oid, order in orders.items():
+        if order['status'] == 'awaiting_upscaled':
+            file_id = update.message.photo[-1].file_id
+            order['upscaled_file_id'] = file_id
+            await context.bot.send_photo(order['user_id'], file_id, caption="✨ Here is your upscaled image!")
+            await context.bot.send_message(order['user_id'], f"🎉 Your order is complete!\nOrder ID: {oid}\nThank you for using our service!")
+            order['status'] = 'complete'
+            if order.get('email') and is_valid_email(order['email']) and not has_typo(order['email']):
+                await send_email_with_image(order['email'], file_id, oid)
+            return
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    user_id = update.message.from_user.id
+    for oid, order in orders.items():
+        if order['user_id'] == user_id and order['status'] == 'approved':
+            if is_valid_email(text) and not has_typo(text):
+                order['email'] = text
+                order['status'] = 'awaiting_upscaled'
+                await update.message.reply_text("📨 Email received. You will get your upscaled image soon via Telegram and Email!")
+            else:
+                await update.message.reply_text("❗ Invalid email or typo detected. Please retype your correct email.")
+            return
+    await update.message.reply_text("Send /start to begin a new order or upload an image to continue.")
 
 async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -217,14 +194,9 @@ async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYP
     order = orders.get(oid)
     if not order:
         return
-
-    if action == 'view_img':
-        await context.bot.send_photo(ADMIN_CHAT_ID, order['file_id'], caption=f"🖼️ Original Image for Order {oid}")
-    elif action == 'view_proof' and order.get('payment_proof'):
-        await context.bot.send_photo(ADMIN_CHAT_ID, order['payment_proof'], caption=f"💳 Payment Proof for Order {oid}")
-    elif action == 'approve':
+    if action == 'approve':
         order['status'] = 'approved'
-        await context.bot.send_message(order['user_id'], f"✅ Your payment for Order {oid} has been approved!")
+        await context.bot.send_message(order['user_id'], f"✅ Your payment for Order {oid} has been approved! Please send your email address.")
     elif action == 'reject':
         order['status'] = 'rejected'
         await context.bot.send_message(order['user_id'], f"❌ Your payment for Order {oid} has been rejected. Please contact support.")
@@ -234,19 +206,10 @@ async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == 'send_upscaled':
         order['status'] = 'awaiting_upscaled'
         await context.bot.send_message(ADMIN_CHAT_ID, f"🚀 Please upload the upscaled image for Order {oid}.")
-
-async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for oid, order in orders.items():
-        if order['status'] == 'awaiting_upscaled':
-            file_id = update.message.photo[-1].file_id
-            order['upscaled_file_id'] = file_id
-            await context.bot.send_photo(order['user_id'], file_id, caption="✨ Here is your upscaled image!")
-            if order.get('email'):
-                send_email_with_image(order['email'], file_id, oid)
-            await context.bot.send_message(order['user_id'], f"🎉 Order {oid} complete! Thank you!")
-            order['status'] = 'complete'
-            await update.message.reply_text(f"✅ Order {oid} marked as complete.")
-            return
+    elif action == 'view_img':
+        await context.bot.send_photo(ADMIN_CHAT_ID, order['file_id'], caption=f"🖼️ Original Image for Order {oid}")
+    elif action == 'view_proof':
+        await context.bot.send_photo(ADMIN_CHAT_ID, order['payment_proof'], caption=f"💳 Payment Proof for Order {oid}")
 
 async def main():
     global telegram_app
@@ -254,23 +217,16 @@ async def main():
 
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(CommandHandler("contact", contact))
-    telegram_app.add_handler(CommandHandler("status", status))
-    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.User(ADMIN_CHAT_ID), text_handler))
-    telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
-    telegram_app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_CHAT_ID), handle_admin_upscaled))
     telegram_app.add_handler(CallbackQueryHandler(plan_choice, pattern=r"^plan_"))
     telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
+    telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
+    telegram_app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_CHAT_ID), handle_admin_upscaled))
+    telegram_app.add_handler(MessageHandler(filters.TEXT, text_handler))
 
     await telegram_app.initialize()
     await telegram_app.start()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
-    print("Webhook set: True\nBot started with webhook...")
+    print("✅ Bot is running with webhook")
 
 if __name__ == "__main__":
-    async def run():
-        await main()
-        config = uvicorn.Config(app=app, host="0.0.0.0", port=8000, log_level="info")
-        server = uvicorn.Server(config)
-        await server.serve()
-
-    asyncio.run(run())
+    asyncio.run(main())
