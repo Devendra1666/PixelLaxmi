@@ -1,13 +1,14 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-import uuid
 import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+import uuid
+import os
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 orders = {}
 ADMIN_CHAT_ID = 8178524981
-
 
 def plan_keyboard():
     return InlineKeyboardMarkup([
@@ -43,20 +44,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+
     if not user_has_active_order(user_id):
         await start(update, context)
         return
 
     order_id = next((oid for oid, o in orders.items() if o['user_id'] == user_id and o['status'] == 'waiting_image'), None)
-    if not order_id:
-        await context.bot.send_message(chat_id=user_id, text="🚧 You have an ongoing order. Please complete it first or send /cancel to start a new one.")
-        return
-
-    photo = update.message.photo[-1]
-    orders[order_id]['original_image'] = photo.file_id
-    orders[order_id]['status'] = 'waiting_plan'
-
-    await context.bot.send_message(chat_id=user_id, text="💡 Please select a plan:", reply_markup=plan_keyboard())
+    if order_id:
+        photo = update.message.photo[-1]
+        orders[order_id]['original_image'] = photo.file_id
+        orders[order_id]['status'] = 'waiting_plan'
+        await context.bot.send_message(chat_id=user_id, text="💡 Please select a plan:", reply_markup=plan_keyboard())
+    else:
+        order_id = next((oid for oid, o in orders.items() if o['user_id'] == user_id and o['status'] == 'waiting_payment'), None)
+        if order_id:
+            photo = update.message.photo[-1]
+            orders[order_id]['payment_proof'] = photo.file_id
+            orders[order_id]['status'] = 'waiting_payment_proof'
+            await context.bot.send_message(chat_id=user_id, text="📩 (Optional) Enter your email address to receive the upscaled image (or type 'skip'):")
+        else:
+            await context.bot.send_message(chat_id=user_id, text="🚧 You have an ongoing order. Please complete it first or send /cancel to start a new one.")
 
 async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -64,7 +71,7 @@ async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     order_id = next((oid for oid, o in orders.items() if o['user_id'] == user_id and o['status'] == 'waiting_plan'), None)
     if not order_id:
-        await query.edit_message_text("Order not found or plan already selected.")
+        await query.edit_message_text("Order not found or already processed.")
         return
 
     selected_plan = int(query.data.split('_')[1])
@@ -81,49 +88,40 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cancel_order(update, context)
         return
 
-    if user_has_active_order(user_id):
-        order = next((o for o in orders.values() if o['user_id'] == user_id and o['status'] not in ['completed', 'cancelled']), None)
-        if order and order['status'] != 'waiting_payment_proof':
-            await context.bot.send_message(chat_id=user_id, text="🚧 You have an ongoing order. Please complete it first or send /cancel to start a new one.")
-            return
+    order = next(((oid, o) for oid, o in orders.items() if o['user_id'] == user_id and o['status'] == 'waiting_payment_proof'), None)
+    if order:
+        oid, o = order
+        if message != "skip":
+            o['email'] = message
+        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"🆕 New Order Received!\nOrder ID: {oid}", reply_markup=admin_keyboard(oid))
+        o['status'] = 'waiting_admin_action'
+        await context.bot.send_message(chat_id=user_id, text="🕐 Payment proof submitted. Waiting for admin approval.")
+        return
 
-    await start(update, context)
+    if user_has_active_order(user_id):
+        await context.bot.send_message(chat_id=user_id, text="🚧 You have an ongoing order. Please complete it first or send /cancel to start a new one.")
+    else:
+        await start(update, context)
 
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    for oid, order in orders.items():
-        if order['user_id'] == user_id and order['status'] not in ['completed', 'cancelled']:
-            order['status'] = 'cancelled'
+    for oid, o in orders.items():
+        if o['user_id'] == user_id and o['status'] not in ['completed', 'cancelled']:
+            o['status'] = 'cancelled'
             await context.bot.send_message(chat_id=user_id, text=f"❌ Order {oid} cancelled successfully.")
             return
-
     await context.bot.send_message(chat_id=user_id, text="⚠️ No active order to cancel.")
-
-async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📩 Contact: pixellaxmi@gmail.com")
-
-async def check_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    order = next(((oid, o) for oid, o in orders.items() if o['user_id'] == user_id and o['status'] not in ['completed', 'cancelled']), None)
-    if order:
-        oid, o = order
-        await update.message.reply_text(f"📌 Your Order ID: {oid}\nStatus: {o['status']}")
-    else:
-        await update.message.reply_text("ℹ️ You have no active order.")
 
 async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    admin_id = query.from_user.id
-    action_data = query.data.split('|')
-    action = action_data[0]
-    order_id = action_data[1] if len(action_data) > 1 else None
+    action, order_id = query.data.split('|')
+    order = orders.get(order_id)
 
-    if admin_id != ADMIN_CHAT_ID:
-        await query.edit_message_text("❌ You are not authorized.")
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        await query.edit_message_text("❌ Not authorized.")
         return
 
-    order = orders.get(order_id)
     if not order:
         await query.edit_message_text("⚠️ Order not found.")
         return
@@ -137,30 +135,51 @@ async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.send_message(chat_id=order['user_id'], text=f"❌ Your payment for Order {order_id} was rejected.")
     elif action == "ask_proof":
         order['status'] = 'waiting_payment'
-        await context.bot.send_message(chat_id=order['user_id'], text=f"🔄 Please re-upload valid payment proof for Order {order_id}.")
+        await context.bot.send_message(chat_id=order['user_id'], text="🔄 Please re-upload valid payment proof.")
     elif action == "view_img":
-        await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=order.get('original_image'), caption=f"🖼️ Original Image for Order {order_id}")
+        await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=order['original_image'], caption=f"🖼️ Original Image for Order {order_id}")
     elif action == "view_proof":
-        await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=order.get('payment_proof'), caption=f"💳 Payment Proof for Order {order_id}")
+        await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=order['payment_proof'], caption=f"💳 Payment Proof for Order {order_id}")
     elif action == "send_upscaled":
         order['status'] = 'awaiting_upscaled'
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"🚀 Please upload the upscaled image for Order {order_id}.")
+        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"📤 Please upload upscaled image for Order {order_id}.")
 
 async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    admin_id = update.effective_user.id
-    if admin_id != ADMIN_CHAT_ID:
+    if update.effective_user.id != ADMIN_CHAT_ID:
         return
-
-    if not update.message.photo:
-        return
-
-    file_id = update.message.photo[-1].file_id
-
-    for oid, order in orders.items():
-        if order['status'] == 'awaiting_upscaled':
-            order['status'] = 'completed'
-            order['upscaled_image'] = file_id
-            await context.bot.send_photo(chat_id=order['user_id'], photo=file_id, caption="✨ Here is your upscaled image!")
-            await context.bot.send_message(chat_id=order['user_id'], text=f"🎉 Order {oid} completed successfully!")
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"✅ Order {oid} has been completed and image sent to user.")
+    photo = update.message.photo[-1].file_id
+    for oid, o in orders.items():
+        if o['status'] == 'awaiting_upscaled':
+            o['status'] = 'completed'
+            await context.bot.send_photo(chat_id=o['user_id'], photo=photo, caption="✨ Here is your upscaled image!")
+            await context.bot.send_message(chat_id=o['user_id'], text=f"🎉 Order {oid} completed successfully!")
+            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"✅ Order {oid} has been completed and upscaled image sent.")
             break
+
+async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📩 Contact: pixellaxmi@gmail.com")
+
+async def check_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    order = next(((oid, o) for oid, o in orders.items() if o['user_id'] == user_id and o['status'] not in ['completed', 'cancelled']), None)
+    if order:
+        oid, o = order
+        await update.message.reply_text(f"📌 Your Order ID: {oid}\nStatus: {o['status']}")
+    else:
+        await update.message.reply_text("ℹ️ You have no active order.")
+
+if __name__ == "__main__":
+    TOKEN = os.getenv("BOT_TOKEN")  # or paste directly '123456:ABC...'
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("cancel", cancel_order))
+    app.add_handler(CommandHandler("contact", contact))
+    app.add_handler(CommandHandler("status", check_status))
+    app.add_handler(MessageHandler(filters.PHOTO, user_photo_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(CallbackQueryHandler(handle_admin_actions))
+    app.add_handler(MessageHandler(filters.PHOTO & filters.User(user_id=ADMIN_CHAT_ID), handle_admin_upscaled))
+
+    print("Bot started...")
+    app.run_polling()
