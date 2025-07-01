@@ -65,8 +65,6 @@ def send_email_with_image(to_email, file_id, order_id):
         msg['From'] = EMAIL_USER
         msg['To'] = to_email
         msg.set_content(f"Hi! Your upscaled image for Order {order_id} is attached. Thank you!")
-        # Attachment code placeholder - requires local saving or API URL fetch
-        # For now, just simulate sending
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as smtp:
             smtp.starttls()
             smtp.login(EMAIL_USER, EMAIL_PASS)
@@ -127,11 +125,40 @@ async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         'email': None,
         'status': 'waiting_plan'
     }
-    await update.message.reply_text(f"🆔 Your Order ID is: {new_oid}\nPlease select a plan:", reply_markup=plan_keyboard())
+    await update.message.reply_text(
+        f"🆔 Your Order ID is: `{new_oid}`\nPlease select a plan:",
+        parse_mode="Markdown",
+        reply_markup=plan_keyboard()
+    )
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.from_user.id
+    args = context.args
+
+    if args:
+        order_id = args[0]
+        order = orders.get(order_id)
+        if order and order['user_id'] == chat_id:
+            await update.message.reply_text(f"📦 Order {order_id} status: {order['status']}")
+        else:
+            await update.message.reply_text("❌ Order not found or does not belong to you.")
+    else:
+        waiting_for_status.add(chat_id)
+        await update.message.reply_text("🔐 Please send your Order ID to check the status. Example: `a1b2c3d4`", parse_mode="Markdown")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.from_user.id
     text = update.message.text.strip()
+
+    if chat_id in waiting_for_status and not text.startswith('/'):
+        waiting_for_status.remove(chat_id)
+        order = orders.get(text)
+        if order and order['user_id'] == chat_id:
+            await update.message.reply_text(f"📦 Order {text} status: {order['status']}")
+        else:
+            await update.message.reply_text("❌ Order not found or does not belong to you.")
+        return
+
     for oid, order in orders.items():
         if order['user_id'] == chat_id and order['status'] == 'waiting_email':
             if is_valid_email(text):
@@ -205,6 +232,7 @@ async def main():
 
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(CommandHandler("contact", contact))
+    telegram_app.add_handler(CommandHandler("status", status))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.User(ADMIN_CHAT_ID), text_handler))
     telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
     telegram_app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_CHAT_ID), handle_admin_upscaled))
