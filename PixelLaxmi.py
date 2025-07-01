@@ -91,7 +91,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    await update.message.reply_text("For any queries please contact @Dev7896")
+    await update.message.reply_text("For any queries please contact @Devendra_1666")
     text = f"📩 Contact Request:\nUser: {user.full_name} (ID: {user.id})\nUsername: @{user.username or 'N/A'}"
     await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
 
