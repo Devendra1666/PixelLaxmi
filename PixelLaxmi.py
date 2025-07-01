@@ -14,10 +14,7 @@ import asyncio
 from functools import partial
 import nest_asyncio
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 orders = {}
@@ -47,7 +44,7 @@ def is_valid_email(email):
     return re.match(r"[^@]+@[^@]+\.[^@]+", email)
 
 def has_typo(email):
-    domain = email.split("@")[1]
+    domain = email.split("@")[-1]
     return any(m in domain for m in COMMON_MISTAKES)
 
 def plan_keyboard():
@@ -127,9 +124,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     await update.message.reply_text("For any queries please contact @Devendra_1666")
-    text = f"📩 Contact Request:
-User: {user.full_name} (ID: {user.id})
-Username: @{user.username or 'N/A'}"
+    text = f"📩 Contact Request:\nUser: {user.full_name} (ID: {user.id})\nUsername: @{user.username or 'N/A'}"
     await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
 
 async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -142,9 +137,7 @@ async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("✅ Payment proof received. Awaiting admin approval.")
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
-                text=f"💰 Payment Received for Order {oid}
-User: {order['user_name']} (ID: {order['user_id']})
-Plan: ₹{order['plan']}",
+                text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
                 reply_markup=admin_keyboard(oid)
             )
             return
@@ -161,8 +154,7 @@ Plan: ₹{order['plan']}",
         'status': 'waiting_plan',
         'email': None
     }
-    await update.message.reply_text(f"🆔 Your Order ID is: {new_oid}
-Please select a plan:", reply_markup=plan_keyboard())
+    await update.message.reply_text(f"🆔 Your Order ID is: {new_oid}\nPlease select a plan:", reply_markup=plan_keyboard())
 
 async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -173,9 +165,7 @@ async def plan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             order['plan'] = int(price)
             order['status'] = 'waiting_payment'
             payment_link = RAZORPAY_LINKS.get(int(price), "")
-            await query.message.edit_text(f"💡 You selected the ₹{price} plan. Please pay using this link: {payment_link}
-
-After payment, upload the payment screenshot here.")
+            await query.message.edit_text(f"💡 You selected the ₹{price} plan. Please pay using this link: {payment_link}\n\nAfter payment, upload the payment screenshot here.")
             return
     await query.message.reply_text("No pending order found.")
 
@@ -210,9 +200,7 @@ async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TY
             file_id = update.message.photo[-1].file_id
             order['upscaled_file_id'] = file_id
             await context.bot.send_photo(order['user_id'], file_id, caption="✨ Here is your upscaled image!")
-            await context.bot.send_message(order['user_id'], f"🎉 Your order is complete!
-Order ID: {oid}
-Thank you for using our service!")
+            await context.bot.send_message(order['user_id'], f"🎉 Your order is complete!\nOrder ID: {oid}\nThank you for using our service!")
             order['status'] = 'complete'
             if order.get('email') and is_valid_email(order['email']) and not has_typo(order['email']):
                 await send_email_with_image(order['email'], file_id, oid)
