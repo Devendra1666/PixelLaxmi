@@ -18,8 +18,6 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 orders = {}
-waiting_for_status = set()
-
 ADMIN_CHAT_ID = 8178524981
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = "https://pixellaxmi.onrender.com/webhook"
@@ -98,7 +96,6 @@ async def send_email_with_image(to_email, file_id, order_id):
 
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, send)
-
         return True
     except Exception as e:
         logger.error(f"❌ Failed to send email with image: {e}")
@@ -121,26 +118,11 @@ async def telegram_webhook(req: Request):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✨ Welcome! Please upload your image to start your order. ✨")
 
-async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
-    await update.message.reply_text("For any queries please contact @Devendra_1666")
-    text = f"📩 Contact Request:\nUser: {user.full_name} (ID: {user.id})\nUsername: @{user.username or 'N/A'}"
-    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
-
 async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     for oid, order in orders.items():
-        if order['user_id'] == user.id and order['status'] == 'waiting_payment':
-            proof_id = update.message.photo[-1].file_id
-            order['payment_proof'] = proof_id
-            order['status'] = 'approved'
-            await update.message.reply_text("✅ Payment proof received.")
-            await update.message.reply_text("📧 Please send your email address where we can deliver the upscaled image (optional). Or just wait and receive it here on Telegram.")
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
-                reply_markup=admin_keyboard(oid)
-            )
+        if order['user_id'] == user.id and order['status'] in ['waiting_plan', 'waiting_payment', 'approved', 'awaiting_upscaled']:
+            await update.message.reply_text("⚠️ You already have an ongoing order. Please wait for it to complete or type /start to cancel and start a new one.")
             return
 
     file_id = update.message.photo[-1].file_id
@@ -212,7 +194,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.message.from_user.id
     for oid, order in orders.items():
-        if order['user_id'] == user_id and order['status'] == 'approved':
+        if order['user_id'] == user_id and order['status'] in ['waiting_plan', 'waiting_payment', 'approved', 'awaiting_upscaled']:
+            await update.message.reply_text("⚠️ You already have an ongoing order. Please wait for it to complete or type /start to cancel and start a new one.")
+            return
+        elif order['user_id'] == user_id and order['status'] == 'approved':
             if is_valid_email(text) and not has_typo(text):
                 order['email'] = text
                 order['status'] = 'awaiting_upscaled'
@@ -227,7 +212,6 @@ async def main():
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CommandHandler("contact", contact))
     telegram_app.add_handler(CallbackQueryHandler(plan_choice, pattern=r"^plan_"))
     telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
     telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
