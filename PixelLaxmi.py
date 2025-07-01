@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 import uvicorn
 import asyncio
 from functools import partial
+import nest_asyncio
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -109,7 +110,6 @@ async def telegram_webhook(req: Request):
     await telegram_app.process_update(update)
     return {"ok": True}
 
-# --- Start Bot Logic ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✨ Welcome! Please upload your image to start your order. ✨")
 
@@ -228,5 +228,7 @@ async def main():
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     print("✅ Bot is running with webhook")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+nest_asyncio.apply()
+loop = asyncio.get_event_loop()
+loop.create_task(main())
+uvicorn.run(app, host="0.0.0.0", port=10000)
