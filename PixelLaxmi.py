@@ -201,9 +201,7 @@ async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TY
             file_id = update.message.photo[-1].file_id
             order['upscaled_file_id'] = file_id
             await context.bot.send_photo(order['user_id'], file_id, caption="✨ Here is your upscaled image!")
-            await context.bot.send_message(order['user_id'], f"🎉 Your order is complete!
-Order ID: {oid}
-Thank you for using our service!")
+            await context.bot.send_message(order['user_id'], f"🎉 Your order is complete!\nOrder ID: {oid}\nThank you for using our service!")
             await context.bot.send_message(ADMIN_CHAT_ID, f"✅ Order {oid} has been completed and upscaled image has been delivered.")
             order['status'] = 'complete'
             if order.get('email') and is_valid_email(order['email']) and not has_typo(order['email']):
