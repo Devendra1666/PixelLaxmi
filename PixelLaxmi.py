@@ -47,7 +47,7 @@ def is_valid_email(email):
     return re.match(r"[^@]+@[^@]+\.[^@]+", email)
 
 def has_typo(email):
-    domain = email.split("@")[-1]
+    domain = email.split("@")[1]
     return any(m in domain for m in COMMON_MISTAKES)
 
 def plan_keyboard():
@@ -126,7 +126,7 @@ async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             proof_id = update.message.photo[-1].file_id
             order['payment_proof'] = proof_id
             order['status'] = 'waiting_admin'
-            await update.message.reply_text("✅ Payment proof received. Awaiting admin approval.")
+            await update.message.reply_text("✅ Payment proof received. Awaiting admin approval.\n\n(Optional) If you want to receive the upscaled image by email too, please type your email now.")
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
                 text=f"💰 Payment Received for Order {oid}\nUser: {order['user_name']} (ID: {order['user_id']})\nPlan: ₹{order['plan']}",
@@ -178,13 +178,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.message.from_user.id
     for oid, order in orders.items():
-        if order['user_id'] == user_id and order['status'] == 'approved':
+        if order['user_id'] == user_id and order['status'] in ['approved', 'waiting_admin']:
             if is_valid_email(text) and not has_typo(text):
                 order['email'] = text
-                order['status'] = 'awaiting_upscaled'
-                await update.message.reply_text("📨 Email received. You will get your upscaled image soon via Telegram and Email!")
+                await update.message.reply_text("📨 Email saved. You will receive your upscaled image via email too once ready!")
             else:
-                await update.message.reply_text("❗ Invalid email or typo detected. Please retype your correct email.")
+                await update.message.reply_text("❗ Invalid email or typo detected. Please retype your correct email (optional).")
             return
     await update.message.reply_text("Send /start to begin a new order or upload an image to continue.")
 
@@ -197,7 +196,7 @@ async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     if action == 'approve':
         order['status'] = 'approved'
-        await context.bot.send_message(order['user_id'], f"✅ Your payment for Order {oid} has been approved! Please send your email address.")
+        await context.bot.send_message(order['user_id'], f"✅ Your payment for Order {oid} has been approved! You will get your image soon.")
         await context.bot.send_message(ADMIN_CHAT_ID, f"✅ You have approved payment for Order {oid}.")
     elif action == 'reject':
         order['status'] = 'rejected'
@@ -222,7 +221,7 @@ async def main():
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(CommandHandler("contact", contact))
     telegram_app.add_handler(CallbackQueryHandler(plan_choice, pattern=r"^plan_"))
-    telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
+    telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\\|"))
     telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
     telegram_app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_CHAT_ID), handle_admin_upscaled))
     telegram_app.add_handler(MessageHandler(filters.TEXT, text_handler))
