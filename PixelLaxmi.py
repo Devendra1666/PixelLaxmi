@@ -47,7 +47,7 @@ def is_valid_email(email):
     return re.match(r"[^@]+@[^@]+\.[^@]+", email)
 
 def has_typo(email):
-    domain = email.split("@")[−1]
+    domain = email.split("@")[-1]
     return any(m in domain for m in COMMON_MISTAKES)
 
 def plan_keyboard():
@@ -171,6 +171,7 @@ async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TY
             order['status'] = 'complete'
             if order.get('email') and is_valid_email(order['email']) and not has_typo(order['email']):
                 await send_email_with_image(order['email'], file_id, oid)
+            await update.message.reply_text(f"✅ Upscaled image for Order {oid} sent to user.")
             return
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -197,12 +198,15 @@ async def handle_admin_actions(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == 'approve':
         order['status'] = 'approved'
         await context.bot.send_message(order['user_id'], f"✅ Your payment for Order {oid} has been approved! Please send your email address.")
+        await context.bot.send_message(ADMIN_CHAT_ID, f"✅ You have approved payment for Order {oid}.")
     elif action == 'reject':
         order['status'] = 'rejected'
         await context.bot.send_message(order['user_id'], f"❌ Your payment for Order {oid} has been rejected. Please contact support.")
+        await context.bot.send_message(ADMIN_CHAT_ID, f"❌ You have rejected payment for Order {oid}.")
     elif action == 'ask_proof':
         order['status'] = 'waiting_payment'
         await context.bot.send_message(order['user_id'], f"🔄 Please re-upload valid payment proof for Order {oid}.")
+        await context.bot.send_message(ADMIN_CHAT_ID, f"🔁 Requested new payment proof for Order {oid}.")
     elif action == 'send_upscaled':
         order['status'] = 'awaiting_upscaled'
         await context.bot.send_message(ADMIN_CHAT_ID, f"🚀 Please upload the upscaled image for Order {oid}.")
