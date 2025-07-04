@@ -40,6 +40,15 @@ telegram_app: Application = None
 
 COMMON_MISTAKES = ["gamil.com", "gmial.com", "gnail.com", "yahho.com", "yhoo.com"]
 
+# ----------- MAIN MENU -----------
+MAIN_MENU = (
+    "✨ Main Menu ✨\n"
+    "/start - Upload an image to place an order\n"
+    "/status - Check your order status\n"
+    "/contact - Contact admin for support\n"
+    "/cancel - Cancel your current order"
+)
+
 def is_valid_email(email):
     return re.match(r"[^@]+@[^@]+\.[^@]+", email)
 
@@ -63,6 +72,13 @@ def admin_keyboard(order_id):
         [InlineKeyboardButton("Request New Payment Proof 🔄", callback_data=f"ask_proof|{order_id}")],
         [InlineKeyboardButton("Send Upscaled Image 🚀", callback_data=f"send_upscaled|{order_id}")],
     ])
+
+async def send_main_menu(update, context):
+    # Agar reply hai toh reply karo, warna message bhejo
+    if hasattr(update, "message") and update.message:
+        await update.message.reply_text(MAIN_MENU)
+    elif hasattr(update, "effective_message") and update.effective_message:
+        await update.effective_message.reply_text(MAIN_MENU)
 
 async def send_email_with_image(to_email, file_id, order_id):
     try:
@@ -118,14 +134,44 @@ async def telegram_webhook(req: Request):
     await telegram_app.process_update(update)
     return {"ok": True}
 
+# ------------ HANDLERS BELOW ---------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_main_menu(update, context)
     await update.message.reply_text("✨ Welcome! Please upload your image to start your order. ✨")
 
 async def contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_main_menu(update, context)
     user = update.message.from_user
     await update.message.reply_text("For any queries please contact @Devendra_1666")
     text = f"📩 Contact Request:\nUser: {user.full_name} (ID: {user.id})\nUsername: @{user.username or 'N/A'}"
     await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_main_menu(update, context)
+    user_id = update.message.from_user.id
+    # Order status logic (show last order status)
+    found = False
+    for oid, order in orders.items():
+        if order['user_id'] == user_id:
+            found = True
+            msg = f"Order ID: {oid}\nStatus: {order['status']}"
+            await update.message.reply_text(msg)
+    if not found:
+        await update.message.reply_text("You don't have any active orders.")
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_main_menu(update, context)
+    user_id = update.message.from_user.id
+    removed = False
+    for oid in list(orders.keys()):
+        if orders[oid]['user_id'] == user_id and orders[oid]['status'] != 'complete':
+            del orders[oid]
+            removed = True
+    if removed:
+        await update.message.reply_text("Your current order has been cancelled.")
+    else:
+        await update.message.reply_text("No active order found to cancel.")
 
 async def user_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
@@ -209,7 +255,13 @@ async def handle_admin_upscaled(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    text = update.message.text.strip().lower()
+    # Show main menu on greetings or commands
+    if text in ['hi', 'hello', 'namaste', '/start', '/status', '/contact', '/cancel']:
+        await send_main_menu(update, context)
+        # /start etc. already have their own handler, so don't double-handle here
+        return
+
     user_id = update.message.from_user.id
     found_ongoing = False
     for oid, order in orders.items():
@@ -223,9 +275,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     await update.message.reply_text("❗ Invalid email or typo detected. Please retype your correct email.")
             else:
-                await update.message.reply_text("⚠️ You already have an ongoing order. Please wait for it to complete or type /start to cancel and start a new one.")
+                await update.message.reply_text("⚠️ You already have an ongoing order. Please wait for it to complete or type /cancel to start a new one.")
             return
     if not found_ongoing:
+        await send_main_menu(update, context)
         await update.message.reply_text("Send /start to begin a new order or upload an image to continue.")
 
 async def main():
@@ -234,6 +287,8 @@ async def main():
 
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(CommandHandler("contact", contact))
+    telegram_app.add_handler(CommandHandler("status", status))
+    telegram_app.add_handler(CommandHandler("cancel", cancel))
     telegram_app.add_handler(CallbackQueryHandler(plan_choice, pattern=r"^plan_"))
     telegram_app.add_handler(CallbackQueryHandler(handle_admin_actions, pattern=r"^(view_img|view_proof|approve|reject|ask_proof|send_upscaled)\|"))
     telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), user_photo_handler))
